@@ -1,0 +1,353 @@
+import React, { useEffect, useMemo, useState } from "react";
+import { CalendarDays, Building2, BedDouble, Users, Receipt, IndianRupee, Search, Plus, TrendingUp } from "lucide-react";
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, LineChart, Line, CartesianGrid } from "recharts";
+
+// Prefer SF Pro on Apple devices; fall back elsewhere.
+const sfProClass = "font-[\\"SF Pro Text\\",\\"SF Pro Display\\",-apple-system,BlinkMacSystemFont,\\"Segoe UI\\",Roboto,Inter,Ubuntu,\\"Helvetica Neue\\",Arial,\\"Noto Sans\\",sans-serif]";
+
+const baseURL = ""; // set to your API base when ready
+
+async function apiGet(path) {
+  if (!baseURL) return mockGet(path);
+  const res = await fetch(baseURL + path);
+  return res.json();
+}
+
+// Mock data to showcase the UI
+function mockGet(path) {
+  if (path === "/metrics") {
+    return Promise.resolve({
+      hostels: 5,
+      rooms: 27,
+      beds: 86,
+      tenants: 142,
+      occupancy: 0.78,
+      monthlyBilled: 342000,
+      monthlyPaid: 271500,
+      dues: 70500,
+    });
+  }
+  if (path.startsWith("/revenue/monthly")) {
+    const data = Array.from({ length: 12 }).map((_, i) => ({
+      month: new Date(2025, i, 1).toLocaleString("en-IN", { month: "short" }),
+      billed: 250000 + i * 8000 + (i % 2 ? 12000 : -6000),
+      expenses: 120000 + i * 5000 + (i % 3 ? 8000 : 0),
+    }));
+    return Promise.resolve(data);
+  }
+  if (path.startsWith("/beds")) {
+    const items = Array.from({ length: 30 }).map((_, i) => ({
+      id: i + 1,
+      hostel: ["HS-IND","HS-KRM","HS-WHT","HS-ELC","HS-HSR"][i % 5],
+      room: `R-${(i % 12) + 101}`,
+      bed: `B${(i % 4) + 1}`,
+      is_ac: i % 2 === 0,
+      base_rent: 6500 + (i % 4) * 500,
+      status: i % 5 === 0 ? "maintenance" : i % 3 === 0 ? "vacant" : "occupied",
+    }));
+    return Promise.resolve(items);
+  }
+  if (path.startsWith("/tenants")) {
+    const items = Array.from({ length: 20 }).map((_, i) => ({
+      id: i + 1,
+      name: `Tenant ${i + 1}`,
+      phone: `9${Math.floor(100000000 + Math.random() * 899999999)}`,
+      hostel: ["HS-IND","HS-KRM","HS-WHT","HS-ELC","HS-HSR"][i % 5],
+      room: `R-${(i % 12) + 101}`,
+      bed: `B${(i % 4) + 1}`,
+      check_in: new Date(2025, (i % 10), 2).toISOString().slice(0,10),
+      rent: 7000 + (i % 4) * 500,
+      status: i % 7 === 0 ? "notice" : "active",
+    }));
+    return Promise.resolve(items);
+  }
+  if (path.startsWith("/invoices")) {
+    const items = Array.from({ length: 25 }).map((_, i) => ({
+      id: 1000 + i,
+      tenant: `Tenant ${(i % 20) + 1}`,
+      month: new Date(2025, (i % 12), 1).toISOString().slice(0,7),
+      due_date: new Date(2025, (i % 12), 5).toISOString().slice(0,10),
+      amount_due: 7500 + (i % 4) * 500,
+      paid: i % 3 === 0 ? 7500 : 0,
+      status: i % 3 === 0 ? "paid" : "unpaid",
+    }));
+    return Promise.resolve(items);
+  }
+  if (path.startsWith("/expenses")) {
+    const items = Array.from({ length: 20 }).map((_, i) => ({
+      id: i + 1,
+      date: new Date(2025, (i % 12), 10).toISOString().slice(0,10),
+      hostel: ["HS-IND","HS-KRM","HS-WHT","HS-ELC","HS-HSR"][i % 5],
+      category: ["Utilities","Maintenance","Capex","Supplies"][i % 4],
+      subcategory: ["Electricity","Plumbing","Furniture","Cleaning"][i % 4],
+      amount: 2500 + (i % 6) * 1200,
+      notes: i % 2 ? "" : "Quarterly service",
+    }));
+    return Promise.resolve(items);
+  }
+  return Promise.resolve([]);
+}
+
+function formatINR(n) {
+  return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(n || 0);
+}
+
+function Card({ children }) {
+  return <div style={{border: '1px solid #e5e7eb', borderRadius: 16, background: 'white', boxShadow: '0 1px 2px rgba(0,0,0,0.03)'}}>{children}</div>;
+}
+function CardBody({ children, style }) {
+  return <div style={{ padding: 16, ...style }}>{children}</div>;
+}
+function Badge({ children, variant }) {
+  const bg = variant === "destructive" ? "#ef4444" : variant === "secondary" ? "#e5e7eb" : "#10b981";
+  const color = variant === "secondary" ? "#111827" : "white";
+  return <span style={{background:bg, color, padding: '2px 8px', borderRadius: 999, fontSize: 12}}>{children}</span>;
+}
+
+function SimpleTable({ columns, data }) {
+  return (
+    <div style={{overflowX:'auto', border:'1px solid #e5e7eb', borderRadius: 16, background:'white'}}>
+      <table style={{width:'100%', fontSize:14}} className={sfProClass}>
+        <thead style={{background:'#f9fafb', color:'#4b5563'}}>
+          <tr>
+            {columns.map((c) => (<th key={c.key} style={{textAlign:'left', padding:'10px 12px', fontWeight:600}}>{c.title}</th>))}
+          </tr>
+        </thead>
+        <tbody>
+          {data.map((row, idx) => (
+            <tr key={idx} style={{borderTop:'1px solid #e5e7eb'}}>
+              {columns.map((c) => (
+                <td key={c.key} style={{padding:'10px 12px', whiteSpace:'nowrap'}}>
+                  {c.render ? c.render(row[c.key], row) : row[c.key]}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+export default function StayInnDashboardStandalone() {
+  const [metrics, setMetrics] = useState(null);
+  const [revenue, setRevenue] = useState([]);
+  const [beds, setBeds] = useState([]);
+  const [tenants, setTenants] = useState([]);
+  const [invoices, setInvoices] = useState([]);
+  const [expenses, setExpenses] = useState([]);
+
+  const [q, setQ] = useState("");
+  const [hostelFilter, setHostelFilter] = useState("all");
+  const [range, setRange] = useState("last-6");
+  const [showExpense, setShowExpense] = useState(false);
+  const [newExpense, setNewExpense] = useState({ date: "", hostel: "", category: "", subcategory: "", amount: "", notes: "" });
+
+  useEffect(() => {
+    (async () => {
+      const [m, rev, b, t, inv, exp] = await Promise.all([
+        apiGet("/metrics"),
+        apiGet("/revenue/monthly"),
+        apiGet("/beds"),
+        apiGet("/tenants"),
+        apiGet("/invoices"),
+        apiGet("/expenses"),
+      ]);
+      setMetrics(m); setRevenue(rev); setBeds(b); setTenants(t); setInvoices(inv); setExpenses(exp);
+    })();
+  }, []);
+
+  const filteredBeds = useMemo(() => beds.filter(b => (hostelFilter === "all" || b.hostel === hostelFilter) && JSON.stringify(b).toLowerCase().includes(q.toLowerCase())), [beds, hostelFilter, q]);
+  const filteredTenants = useMemo(() => tenants.filter(t => (hostelFilter === "all" || t.hostel === hostelFilter) && JSON.stringify(t).toLowerCase().includes(q.toLowerCase())), [tenants, hostelFilter, q]);
+  const filteredInvoices = useMemo(() => invoices.filter(i => (hostelFilter === "all" || (i.hostel||"") === hostelFilter) && JSON.stringify(i).toLowerCase().includes(q.toLowerCase())), [invoices, hostelFilter, q]);
+  const filteredExpenses = useMemo(() => expenses.filter(e => (hostelFilter === "all" || e.hostel === hostelFilter) && JSON.stringify(e).toLowerCase().includes(q.toLowerCase())), [expenses, hostelFilter, q]);
+
+  const hostels = useMemo(() => ["all", ...Array.from(new Set(beds.map(b => b.hostel)))], [beds]);
+  const lastMonths = useMemo(() => {
+    if (!revenue?.length) return [];
+    const n = range === "last-6" ? 6 : 12;
+    return revenue.slice(-n);
+  }, [revenue, range]);
+
+  return (
+    <div className={sfProClass} style={{minHeight:'100vh', background:'linear-gradient(to bottom,#f9fafb,#ffffff)', color:'#111827'}}>
+      {/* Top Bar */}
+      <div style={{position:'sticky', top:0, zIndex:10, backdropFilter:'blur(4px)', background:'rgba(255,255,255,0.8)', borderBottom:'1px solid #e5e7eb'}}>
+        <div style={{maxWidth:1120, margin:'0 auto', padding:'12px 16px', display:'flex', alignItems:'center', gap:12}}>
+          <Building2 size={22} />
+          <div style={{fontWeight:600}}>Stay Inn — Ops Dashboard</div>
+          <div style={{marginLeft:'auto', display:'flex', alignItems:'center', gap:8}}>
+            <div style={{position:'relative'}}>
+              <Search size={16} style={{position:'absolute', left:8, top:10, color:'#6b7280'}} />
+              <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search beds, tenants, invoices…" style={{padding:'8px 10px 8px 30px', width:260, border:'1px solid #e5e7eb', borderRadius:8}} />
+            </div>
+            <select value={hostelFilter} onChange={e=>setHostelFilter(e.target.value)} style={{padding:'8px 10px', border:'1px solid #e5e7eb', borderRadius:8}}>
+              {hostels.map(h => <option key={h} value={h}>{h === "all" ? "All hostels" : h}</option>)}
+            </select>
+            <select value={range} onChange={e=>setRange(e.target.value)} style={{padding:'8px 10px', border:'1px solid #e5e7eb', borderRadius:8}}>
+              <option value="last-6">Last 6 months</option>
+              <option value="last-12">Last 12 months</option>
+            </select>
+            <button onClick={()=>setShowExpense(true)} style={{padding:'8px 12px', border:'1px solid #0ea5e9', background:'#0ea5e9', color:'white', borderRadius:12, display:'flex', alignItems:'center', gap:6}}>
+              <Plus size={16}/> Add Expense
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Metrics */}
+      <div style={{maxWidth:1120, margin:'0 auto', padding:'24px 16px', display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))', gap:16}}>
+        <MetricCard icon={<Users size={18}/>} label="Tenants" value={metrics?.tenants} />
+        <MetricCard icon={<BedDouble size={18}/>} label="Occupancy" value={`${Math.round((metrics?.occupancy||0)*100)}%`} right={<TrendingUp size={14}/>} />
+        <MetricCard icon={<Receipt size={18}/>} label="Billed (this month)" value={formatINR(metrics?.monthlyBilled)} />
+        <MetricCard icon={<IndianRupee size={18}/>} label="Dues" value={formatINR(metrics?.dues)} tone="warn" />
+      </div>
+
+      {/* Charts */}
+      <div style={{maxWidth:1120, margin:'0 auto', padding:'0 16px 24px'}}>
+        <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:16}}>
+          <Card><CardBody>
+            <div style={{display:'flex', alignItems:'center', gap:8, marginBottom:8}}>
+              <CalendarDays size={16}/><div style={{fontWeight:600}}>Revenue vs Expenses</div>
+            </div>
+            <div style={{height:260}}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={lastMonths}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="month" />
+                  <YAxis />
+                  <Tooltip />
+                  <Bar dataKey="billed" fill="#0ea5e9" name="Billed" />
+                  <Bar dataKey="expenses" fill="#22c55e" name="Expenses" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </CardBody></Card>
+          <Card><CardBody>
+            <div style={{fontWeight:600, marginBottom:8}}>Collections Trend</div>
+            <div style={{height:260}}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={lastMonths}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="month" />
+                  <YAxis />
+                  <Tooltip />
+                  <Line type="monotone" dataKey="billed" stroke="#0ea5e9" name="Billed" />
+                  <Line type="monotone" dataKey="expenses" stroke="#22c55e" name="Expenses" />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </CardBody></Card>
+        </div>
+      </div>
+
+      {/* Tabs (simple) */}
+      <div style={{maxWidth:1120, margin:'0 auto', padding:'0 16px 48px'}}>
+        <Tabs
+          tabs={[
+            { id: "beds", label: "Beds", content: <SimpleTable columns={[
+              { key: "hostel", title: "Hostel" },
+              { key: "room", title: "Room" },
+              { key: "bed", title: "Bed" },
+              { key: "is_ac", title: "AC?", render: v => v ? <Badge>AC</Badge> : <Badge variant="secondary">Non-AC</Badge> },
+              { key: "base_rent", title: "Base Rent", render: v => formatINR(v) },
+              { key: "status", title: "Status", render: v => (
+                v === "occupied" ? <Badge>Occupied</Badge> :
+                v === "vacant" ? <Badge variant="secondary">Vacant</Badge> :
+                <Badge variant="secondary">Maintenance</Badge>
+              ) }
+            ]} data={filteredBeds} /> },
+            { id: "tenants", label: "Tenants", content: <SimpleTable columns={[
+              { key: "name", title: "Tenant" },
+              { key: "phone", title: "Phone" },
+              { key: "hostel", title: "Hostel" },
+              { key: "room", title: "Room" },
+              { key: "bed", title: "Bed" },
+              { key: "check_in", title: "Check‑in" },
+              { key: "rent", title: "Agreed Rent", render: v => formatINR(v) },
+              { key: "status", title: "Status", render: v => v === "active" ? <Badge>Active</Badge> : <Badge variant="secondary">Notice</Badge> }
+            ]} data={filteredTenants} /> },
+            { id: "invoices", label: "Invoices", content: <SimpleTable columns={[
+              { key: "tenant", title: "Tenant" },
+              { key: "month", title: "Month" },
+              { key: "due_date", title: "Due Date" },
+              { key: "amount_due", title: "Amount", render: v => formatINR(v) },
+              { key: "status", title: "Status", render: v => v === "paid" ? <Badge>Paid</Badge> : <Badge variant="destructive">Unpaid</Badge> }
+            ]} data={filteredInvoices} /> },
+            { id: "expenses", label: "Expenses", content: <SimpleTable columns={[
+              { key: "date", title: "Date" },
+              { key: "hostel", title: "Hostel" },
+              { key: "category", title: "Category" },
+              { key: "subcategory", title: "Subcategory" },
+              { key: "amount", title: "Amount", render: v => formatINR(v) },
+              { key: "notes", title: "Notes" },
+            ]} data={filteredExpenses} /> },
+          ]}
+        />
+      </div>
+
+      {/* Modal */}
+      {showExpense && (
+        <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.35)', display:'grid', placeItems:'center'}} onClick={()=>setShowExpense(false)}>
+          <div style={{background:'white', borderRadius:16, width:520, maxWidth:'90%', padding:16}} onClick={e=>e.stopPropagation()}>
+            <div style={{fontWeight:700, marginBottom:12}}>Add Expense</div>
+            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:12}}>
+              <Field label="Date"><input type="date" value={newExpense.date} onChange={e=>setNewExpense({...newExpense, date:e.target.value})} /></Field>
+              <Field label="Hostel"><input placeholder="HS-KRM" value={newExpense.hostel} onChange={e=>setNewExpense({...newExpense, hostel:e.target.value})} /></Field>
+              <Field label="Category"><input placeholder="Utilities" value={newExpense.category} onChange={e=>setNewExpense({...newExpense, category:e.target.value})} /></Field>
+              <Field label="Subcategory"><input placeholder="Electricity" value={newExpense.subcategory} onChange={e=>setNewExpense({...newExpense, subcategory:e.target.value})} /></Field>
+              <Field label="Amount"><input type="number" value={newExpense.amount} onChange={e=>setNewExpense({...newExpense, amount:e.target.value})} /></Field>
+              <div style={{gridColumn:'1 / -1'}}><Field label="Notes"><input value={newExpense.notes} onChange={e=>setNewExpense({...newExpense, notes:e.target.value})} /></Field></div>
+            </div>
+            <div style={{display:'flex', justifyContent:'flex-end', gap:8, marginTop:12}}>
+              <button onClick={()=>setShowExpense(false)} style={{padding:'8px 12px', border:'1px solid #e5e7eb', borderRadius:10}}>Cancel</button>
+              <button onClick={()=>{ setExpenses([{ id: Date.now(), date: newExpense.date, hostel: newExpense.hostel, category: newExpense.category, subcategory: newExpense.subcategory, amount: Number(newExpense.amount), notes: newExpense.notes }, ...expenses]); setShowExpense(false); setNewExpense({ date:'', hostel:'', category:'', subcategory:'', amount:'', notes:'' }); }} style={{padding:'8px 12px', border:'1px solid #0ea5e9', background:'#0ea5e9', color:'white', borderRadius:10}}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Field({ label, children }) {
+  return (
+    <label style={{display:'grid', gap:6, fontSize:12}}>
+      <span style={{color:'#6b7280'}}>{label}</span>
+      <div>{children}</div>
+    </label>
+  );
+}
+
+function Tabs({ tabs }) {
+  const [active, setActive] = useState(tabs[0]?.id);
+  return (
+    <div>
+      <div style={{display:'flex', gap:8, flexWrap:'wrap'}}>
+        {tabs.map(t => (
+          <button key={t.id} onClick={()=>setActive(t.id)} style={{padding:'8px 12px', border:'1px solid #e5e7eb', borderRadius:12, background: active===t.id ? '#111827' : 'white', color: active===t.id ? 'white' : '#111827'}}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <div style={{marginTop:12}}>
+        {tabs.find(t => t.id === active)?.content}
+      </div>
+    </div>
+  );
+}
+
+function MetricCard({ icon, label, value, right, tone }) {
+  const ring = tone === "warn" ? "#fef3c7" : "#e0f2fe";
+  return (
+    <Card><CardBody>
+      <div style={{display:'flex', alignItems:'center', gap:12}}>
+        <div style={{padding:8, borderRadius:12, background:'#f3f4f6'}}>{icon}</div>
+        <div style={{flex:1}}>
+          <div style={{fontSize:12, letterSpacing:0.4, textTransform:'uppercase', color:'#6b7280'}}>{label}</div>
+          <div style={{display:'flex', alignItems:'center', gap:8, fontWeight:700, fontSize:18}}>{value}{right}</div>
+        </div>
+      </div>
+    </CardBody></Card>
+  );
+}
